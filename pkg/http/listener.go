@@ -17,6 +17,7 @@
 package http
 
 import (
+	"bufio"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -31,6 +32,10 @@ import (
 )
 
 var sslRequiredErrMsg = []byte("HTTP/1.0 403 Forbidden\r\n\r\nSSL required")
+var sslRedirectToSSL = "HTTP/1.1 301 Moved Permanently\r\n" +
+	"Connection: close\r\n" +
+	"Content-Length: 0\r\n" +
+	"Location: "
 
 // HTTP methods.
 var methods = []string{
@@ -162,8 +167,15 @@ func (listener *httpListener) start() {
 				send(acceptResult{bufconn, nil}, doneCh)
 			} else {
 				// As TLS is configured and we got plain text HTTP request,
-				// return 403 (forbidden) error.
-				bufconn.Write(sslRequiredErrMsg)
+				// redirect to HTTPS.
+				req, err := http.ReadRequest(bufio.NewReader(bufconn))
+				if err == nil {
+					target := "https://" + req.Host + req.RequestURI
+					bufconn.Write([]byte(sslRedirectToSSL + target + "\r\n\r\n"))
+				} else {
+					// return 403 (forbidden) error
+					bufconn.Write(sslRequiredErrMsg)
+				}
 				bufconn.Close()
 			}
 			return
